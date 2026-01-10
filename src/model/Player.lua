@@ -49,7 +49,7 @@ function Player.repportError(error, trace)
     local error_message = {}
     table.insert(error_message, error)
     table.insert(error_message, trace)
-    
+
     local storage_debug = Player.getStorageDebug()
     storage_debug[Lua_player.index] = table.concat(error_message, "\n")
 end
@@ -160,10 +160,106 @@ function Player.beginCrafting(item, count)
     end
 end
 
+local function split(str, delimiter)
+    if str == nil then return {} end
+    if delimiter == nil or delimiter == "" then return {str} end
+
+    local result = {}
+    for part in string.gmatch(str, "[^"..delimiter.."]+") do
+        table.insert(result, part)
+    end
+    return result
+end
+
+local function get_last_part(str, delimiter)
+    local result = split(str, delimiter)
+    return result[#result]  -- 返回最后一个元素
+end
+
+-------------------------------------------------------------------------------
+---生成区块统计描述
+---@param block BlockData
+---@return string
+function Player.generateBlockDescription(block)
+    if block == nil then
+        return ""
+    end
+
+    local lines = {}
+
+    -- 产出信息
+    if block.products and table.size(block.products) > 0 then
+        table.insert(lines, "[font=default-bold][color=#00FF90]✦ 产 出 /min[/color][/font]")
+        for _, product in pairs(block.products) do
+            local base_amount = product.amount or 0
+            local count_limit = block.count_limit or 1
+            local amount = base_amount * count_limit
+            if amount > 0 then
+                local product_obj = Product(product)
+                local key = get_last_part(product_obj:getLocalisedName()[1], ".")
+                local prototype = product_obj.lua_prototype
+                if not prototype or not key then goto continue end
+
+                local parts = split(product_obj:getTableKey(), "#")
+
+                key = parts[1]
+                local type_tag = prototype.type
+                local comment = parts[2] and ("(" .. parts[2] .. ")") or ""
+                local local_name = User.getTranslate(key)
+                local formatted_amount = Format.formatNumberKilo(amount * 60)
+
+                table.insert(lines, string.format("  [%s=%s] %s%s: %s", type_tag, key, local_name, comment, formatted_amount))
+            end
+            ::continue::
+        end
+        table.insert(lines, "")
+    end
+
+    -- 输入信息
+    if block.ingredients and table.size(block.ingredients) > 0 then
+        table.insert(lines, "[font=default-bold][color=#66B2FF]✧ 输 入 /min[/color][/font]")
+        for _, ingredient in pairs(block.ingredients) do
+            local base_amount = ingredient.amount or 0
+            local count_limit = block.count_limit or 1
+            local amount = base_amount * count_limit
+            if amount > 0 then
+                local ingredient_obj = Product(ingredient)
+                local key = get_last_part(ingredient_obj:getLocalisedName()[1], ".")
+                local prototype = ingredient_obj.lua_prototype
+                if not prototype or not key then goto continue end
+
+                local parts = split(ingredient_obj:getTableKey(), "#")
+
+                key = parts[1]
+                local type_tag = prototype.type
+                local comment = parts[2] and ("(" .. parts[2] .. ")") or ""
+                local local_name = User.getTranslate(key)
+                local formatted_amount = Format.formatNumberKilo(amount * 60)
+
+                table.insert(lines, string.format("  [%s=%s] %s%s: %s", type_tag, key, local_name, comment, formatted_amount))
+            end
+            ::continue::
+        end
+        table.insert(lines, "")
+    end
+
+    -- 耗电信息
+    if block.power_limit and block.power_limit > 0 then
+        local power = Format.formatNumberKilo(block.power_limit, "W")
+        table.insert(lines, string.format("⚡ 耗 电 %s", power))
+        table.insert(lines, "")
+    end
+
+    return table.concat(lines, "\n")
+end
+
+
 -------------------------------------------------------------------------------
 ---Get smart tool
+---@param entities table
+---@param block? BlockData
 ---@return LuaItemStack
-function Player.getSmartTool(entities)
+function Player.getSmartTool(entities, block)
     if Lua_player == nil then
         return nil
     end
@@ -172,6 +268,14 @@ function Player.getSmartTool(entities)
     tool_stack.set_stack({ name = "blueprint" })
     tool_stack.set_blueprint_entities(entities)
     tool_stack.label = "Helmod Smart Tool"
+
+    -- 生成并设置蓝图描述
+    if block then
+        local description = Player.generateBlockDescription(block)
+        if description ~= "" then
+            tool_stack.blueprint_description = description
+        end
+    end
 
     Lua_player.add_to_clipboard(tool_stack)
     Lua_player.activate_paste()
@@ -344,7 +448,7 @@ function Player.setSmartToolRecipeDisplayPanel(recipe, type, index, always_show)
             offset = offset + 1
         end
     end
-    
+
 
     Player.getSmartTool(entities)
 end
@@ -371,7 +475,7 @@ function Player.setSmartToolBuildingConstantCombinator(block)
     local index = 1
     for _, item in ipairs(items) do
         local elements = summary[item];
-        if table_size(elements) > 0 then
+        if table.size(elements) > 0 then
             local section = {
                 index = index,
                 filters = {}
@@ -408,7 +512,7 @@ function Player.setSmartToolBuildingConstantCombinator(block)
             }
         }
     }
-    Player.getSmartTool({ entity })
+    Player.getSmartTool({ entity }, block)
 end
 
 -------------------------------------------------------------------------------
@@ -721,7 +825,7 @@ function Player.checkFactoryLimitationModule(module, lua_recipe)
         local entity_allowed_effects = entity_prototype:getAllowedEffects()
         local recipe_allowed_module_categories = recipe_prototype:getAllowedModuleCategories()
         local entity_allowed_module_categories = entity_prototype:getAllowedModuleCategories()
-        
+
         for effect_name, value in pairs(module_effects) do
             local positive_effect = Player.checkPositiveEffect(effect_name, value)
             if table.size(recipe_allowed_effects) > 0 then
@@ -778,7 +882,7 @@ function Player.getFactoryLimitationModuleMessage(module, lua_recipe)
         local entity_allowed_effects = entity_prototype:getAllowedEffects()
         local recipe_allowed_module_categories = recipe_prototype:getAllowedModuleCategories()
         local entity_allowed_module_categories = entity_prototype:getAllowedModuleCategories()
-        
+
         for effect_name, value in pairs(module_effects) do
             local positive_effect = Player.checkPositiveEffect(effect_name, value)
             if table.size(recipe_allowed_effects) > 0 then
@@ -843,7 +947,7 @@ function Player.checkBeaconLimitationModule(beacon, lua_recipe, module)
         local entity_allowed_effects = entity_prototype:getAllowedEffects()
         local recipe_allowed_module_categories = recipe_prototype:getAllowedModuleCategories()
         local entity_allowed_module_categories = entity_prototype:getAllowedModuleCategories()
-        
+
         for effect_name, value in pairs(module_effects) do
             local positive_effect = Player.checkPositiveEffect(effect_name, value)
             if table.size(recipe_allowed_effects) > 0 then
@@ -902,7 +1006,7 @@ function Player.getBeaconLimitationModuleMessage(beacon, lua_recipe, module)
         local entity_allowed_effects = entity_prototype:getAllowedEffects()
         local recipe_allowed_module_categories = recipe_prototype:getAllowedModuleCategories()
         local entity_allowed_module_categories = entity_prototype:getAllowedModuleCategories()
-        
+
         for effect_name, value in pairs(module_effects) do
             local positive_effect = Player.checkPositiveEffect(effect_name, value)
             if table.size(recipe_allowed_effects) > 0 then
@@ -994,7 +1098,7 @@ function Player.getCategoriesMachines()
     end
 
     -- defines.mod.recipes.boiler.category => nothing
-    
+
     -- crafting for research
     for _, lua_prototype in pairs(Player.getLabMachines()) do
         local prototype = Player.getProductionMachine(lua_prototype)
@@ -1358,7 +1462,7 @@ function Player.getModuleEffects(module)
         -- arround the % value
         if final_value >= 0  then
             final_value = math.floor(final_value*100 + 0.05)/100
-        else 
+        else
             final_value = math.ceil(final_value*100 - 0.05)/100
         end
         if effect_name == "quality" then
@@ -1669,7 +1773,7 @@ function Player.getSpoilableItems()
     table.insert(filters, { filter = "spoil-result", elem_filters = {{ filter = "hidden", mode = "and", invert = true }}, mode = "and"})
     table.insert(filters, { filter = "hidden", mode = "and", invert = true })
     local results = prototypes.get_item_filtered(filters)
-    
+
     return results
 end
 
@@ -1689,7 +1793,7 @@ function Player.getSpoilableRecipes()
         else
             local i = 0
         end
-        
+
         local recipe = {}
         recipe.enabled = true
         recipe.energy = prototype.get_spoil_ticks() / 60
@@ -1959,7 +2063,7 @@ end
 function Player.setCustomizedRecipe(recipe)
     local customized_recipes = Player.getCustomizedRecipes()
     if customized_recipes[recipe.name] == nil then
-       storage.customized_recipe_id = (storage.customized_recipe_id or 0) + 1 
+       storage.customized_recipe_id = (storage.customized_recipe_id or 0) + 1
     end
     customized_recipes[recipe.name] = table.deepcopy(recipe)
 end
